@@ -1,0 +1,22 @@
+name               = "session-gate"
+main               = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name       = "SESSION_DO"
+class_name = "SessionDO"
+
+[[durable_objects.bindings]]
+name       = "RATE_LIMITER_DO"
+class_name = "RateLimiterDO"
+
+# DO SQLite migration — registers both classes as SQLite-backed DOs
+[[migrations]]
+tag               = "v1"
+new_sqlite_classes = ["SessionDO", "RateLimiterDO"]
+
+[vars]
+SESSION_TTL_MS      = "1800000"   # 30 minutes default session TTL
+RATE_LIMIT_MAX      = "100"       # max requests per window
+RATE_LIMIT_WINDOW_MS = "60000"    # 1 minute sliding window

@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development (never commit .dev.vars)
+# Set ALLOWED_ORIGIN to your frontend domain in production to restrict CORS
+# ALLOWED_ORIGIN=https://yourdomain.com
+# (leave unset to allow all origins — fine for local dev)
