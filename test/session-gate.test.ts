@@ -152,7 +152,7 @@ describe("last_active field on session state", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Single-writer concurrency: 20 concurrent events → count = 20
+// Single-writer concurrency: 20 sequential + 100 concurrent events
 // ---------------------------------------------------------------------------
 
 describe("Single-writer event counter", () => {
@@ -170,6 +170,35 @@ describe("Single-writer event counter", () => {
       expect(res.status).toBe(200);
     }
 
+    const readRes = await SELF.fetch(`${BASE}/sessions/${id}`);
+    const session = (await readRes.json()) as { eventCount: number };
+    expect(session.eventCount).toBe(N);
+  });
+
+  it("handles 100 concurrent event POSTs and arrives at exactly 100", { timeout: 60_000 }, async () => {
+    // Unique session — isolated from all other tests
+    const createRes = await SELF.fetch(`${BASE}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: `user-concurrent-${crypto.randomUUID()}` }),
+    });
+    expect(createRes.status).toBe(201);
+    const { id } = (await createRes.json()) as { id: string };
+
+    // Fire 100 concurrent requests. The DO model serialises them internally
+    // via single-writer guarantee — the final count must be exactly 100.
+    const N = 100;
+    const responses = await Promise.all(
+      Array.from({ length: N }, () =>
+        SELF.fetch(`${BASE}/sessions/${id}/event`, { method: "POST" })
+      )
+    );
+
+    // All 100 must succeed — DO serialises without dropping requests at this volume
+    const failures = responses.filter((r) => r.status !== 200);
+    expect(failures).toHaveLength(0);
+
+    // Read AFTER all writes have resolved — count must be exactly N
     const readRes = await SELF.fetch(`${BASE}/sessions/${id}`);
     const session = (await readRes.json()) as { eventCount: number };
     expect(session.eventCount).toBe(N);
