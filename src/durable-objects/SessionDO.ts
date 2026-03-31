@@ -21,6 +21,7 @@ export interface SessionData {
   createdAt: number;
   expiresAt: number;
   eventCount: number;
+  lastActive: number;
 }
 
 interface SessionRow {
@@ -30,6 +31,7 @@ interface SessionRow {
   created_at: number;
   expires_at: number;
   event_count: number;
+  last_active: number;
 }
 
 export class SessionDO implements DurableObject {
@@ -44,6 +46,7 @@ export class SessionDO implements DurableObject {
   }
 
   private initSchema(): void {
+    // 1. Create table with all columns for brand-new DO instances
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id          TEXT    PRIMARY KEY,
@@ -51,9 +54,22 @@ export class SessionDO implements DurableObject {
         metadata    TEXT    NOT NULL DEFAULT '{}',
         created_at  INTEGER NOT NULL,
         expires_at  INTEGER NOT NULL,
-        event_count INTEGER NOT NULL DEFAULT 0
+        event_count INTEGER NOT NULL DEFAULT 0,
+        last_active INTEGER NOT NULL DEFAULT 0
       )
     `);
+    // 2. Add last_active column to pre-existing DO instances that have the old schema.
+    //    Swallow only "duplicate column" errors; re-throw anything else.
+    try {
+      this.sql.exec(`ALTER TABLE sessions ADD COLUMN last_active INTEGER NOT NULL DEFAULT 0`);
+      // Backfill any pre-existing rows so last_active equals created_at (not 0)
+      this.sql.exec(`UPDATE sessions SET last_active = created_at WHERE last_active = 0`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.toLowerCase().includes("duplicate column") && !msg.toLowerCase().includes("already exists")) {
+        throw e;
+      }
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -102,13 +118,14 @@ export class SessionDO implements DurableObject {
 
     const metadata = (body as Record<string, unknown>)["metadata"] ?? {};
     this.sql.exec(
-      `INSERT INTO sessions (id, user_id, metadata, created_at, expires_at, event_count)
-       VALUES (?, ?, ?, ?, ?, 0)`,
+      `INSERT INTO sessions (id, user_id, metadata, created_at, expires_at, event_count, last_active)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
       id,
       userId,
       JSON.stringify(metadata),
       now,
-      expiresAt
+      expiresAt,
+      now
     );
 
     // Schedule alarm to clean up expired session
@@ -122,7 +139,7 @@ export class SessionDO implements DurableObject {
   private handleRead(sessionId: string): Response {
     const rows = this.sql
       .exec<SessionRow>(
-        `SELECT id, user_id, metadata, created_at, expires_at, event_count
+        `SELECT id, user_id, metadata, created_at, expires_at, event_count, last_active
          FROM sessions WHERE id = ? AND expires_at > ?`,
         sessionId,
         Date.now()
@@ -141,18 +158,22 @@ export class SessionDO implements DurableObject {
       createdAt: r.created_at,
       expiresAt: r.expires_at,
       eventCount: r.event_count,
+      // last_active is backfilled to created_at for pre-existing rows; always >= created_at
+      lastActive: r.last_active || r.created_at,
     };
     return Response.json(session);
   }
 
   private handleEvent(sessionId: string): Response {
-    // Atomically increment event_count — single-writer guarantee from DO model
+    const now = Date.now();
+    // Atomically increment event_count and update last_active — single-writer guarantee from DO model
     const result = this.sql.exec<{ event_count: number }>(
-      `UPDATE sessions SET event_count = event_count + 1
+      `UPDATE sessions SET event_count = event_count + 1, last_active = ?
        WHERE id = ? AND expires_at > ?
        RETURNING event_count`,
+      now,
       sessionId,
-      Date.now()
+      now
     );
     const rows = result.toArray();
     if (rows.length === 0) {

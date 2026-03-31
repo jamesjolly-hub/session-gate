@@ -103,6 +103,55 @@ describe("POST /session/create (spec alias for POST /sessions)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// last_active — spec field: GET /sessions/:id returns last_active timestamp
+// ---------------------------------------------------------------------------
+
+describe("last_active field on session state", () => {
+  it("returns lastActive equal to createdAt on a fresh session (no events)", async () => {
+    const before = Date.now();
+    const createRes = await SELF.fetch(`${BASE}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "user-last-active-fresh" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { id } = (await createRes.json()) as { id: string };
+
+    const readRes = await SELF.fetch(`${BASE}/sessions/${id}`);
+    expect(readRes.status).toBe(200);
+    const session = (await readRes.json()) as { lastActive: number; createdAt: number };
+    expect(typeof session.lastActive).toBe("number");
+    expect(session.lastActive).toBeGreaterThanOrEqual(before);
+    expect(session.lastActive).toBeGreaterThan(0);
+    // On a fresh session, lastActive should equal createdAt
+    expect(session.lastActive).toBe(session.createdAt);
+  });
+
+  it("updates lastActive when an event is recorded", async () => {
+    const createRes = await SELF.fetch(`${BASE}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "user-last-active-update" }),
+    });
+    const { id } = (await createRes.json()) as { id: string };
+
+    // Read before event
+    const beforeRes = await SELF.fetch(`${BASE}/sessions/${id}`);
+    const before = (await beforeRes.json()) as { lastActive: number };
+
+    // Fire an event
+    await SELF.fetch(`${BASE}/sessions/${id}/event`, { method: "POST" });
+
+    // Read after event
+    const afterRes = await SELF.fetch(`${BASE}/sessions/${id}`);
+    const after = (await afterRes.json()) as { lastActive: number; eventCount: number };
+    expect(after.lastActive).toBeGreaterThanOrEqual(before.lastActive);
+    expect(after.lastActive).toBeGreaterThan(0);
+    expect(after.eventCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Single-writer concurrency: 20 concurrent events → count = 20
 // ---------------------------------------------------------------------------
 
