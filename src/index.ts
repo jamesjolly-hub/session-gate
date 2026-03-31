@@ -124,8 +124,25 @@ export default {
         headers: request.headers,
         body: request.body,
       });
-      const id = env.SESSION_DO.idFromName("session-store");
-      const stub = env.SESSION_DO.get(id);
+      const doId = env.SESSION_DO.idFromName("session-store");
+      const stub = env.SESSION_DO.get(doId);
+      return addCors(await stub.fetch(doRequest), env);
+    }
+
+    // --- Singular /session/:id aliases (spec compat) ---
+    if (parts[0] === "session" && parts[1]) {
+      // POST /session/:id/event  →  POST /sessions/:id/event
+      // GET  /session/:id        →  GET  /sessions/:id
+      // DELETE /session/:id      →  DELETE /sessions/:id
+      const doId = env.SESSION_DO.idFromName("session-store");
+      const stub = env.SESSION_DO.get(doId);
+      const doUrl = new URL(request.url);
+      doUrl.pathname = "/" + ["sessions", ...parts.slice(1)].join("/");
+      const doRequest = new Request(doUrl.toString(), {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+      });
       return addCors(await stub.fetch(doRequest), env);
     }
 

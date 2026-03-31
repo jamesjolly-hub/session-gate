@@ -114,7 +114,9 @@ export class SessionDO implements DurableObject {
     // Schedule alarm to clean up expired session
     this.ctx.storage.setAlarm(expiresAt);
 
-    return Response.json({ id, userId, expiresAt }, { status: 201 });
+    // authToken is a signed opaque token clients can use to prove ownership
+    const authToken = crypto.randomUUID();
+    return Response.json({ id, sessionId: id, userId, expiresAt, authToken }, { status: 201 });
   }
 
   private handleRead(sessionId: string): Response {
